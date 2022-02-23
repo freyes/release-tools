@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import argparse
 import logging
 from pathlib import Path
 import requests
@@ -26,6 +27,13 @@ LpConfig = Dict[str, Dict[str, List[str]]]
 
 
 logger = logging.getLogger(__name__)
+
+
+def setup_options() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-c', '--charms', nargs='*', dest='charms',
+                        metavar='CHARMS', help='List of charms')
+    return parser.parse_args()
 
 
 def get_lp_builder_config() -> LpConfig:
@@ -114,10 +122,22 @@ def decode_channel_map(charm: str,
 
 
 def main() -> None:
+    opts = setup_options()
     config = get_lp_builder_config()
-    print("charms", config.keys())
-    print(f"Number of charms: {len(config.keys())}")
-    for charm in config.keys():
+    if opts.charms:
+        opts_charms_set = set(opts.charms)
+        result = set(config.keys()).intersection(opts_charms_set)
+        if len(result) == len(opts.charms):
+            charms = opts.charms
+        else:
+            print('Unknown charms: %s' % (opts_charms_set - result, ))
+            sys.exit(1)
+    else:
+        charms = config.keys()
+
+    print("charms", charms)
+    print(f"Number of charms: {len(charms)}")
+    for charm in charms:
         cr = INFO_URL.format(charm=charm)
         r = requests.get(cr)
         latest_stable = decode_channel_map(charm, r, 'latest/stable', '21.10')
