@@ -20,6 +20,7 @@
 import argparse
 import logging
 from pathlib import Path
+import os
 import requests
 import sys
 from typing import List, Optional, Dict
@@ -58,6 +59,9 @@ def setup_options() -> argparse.Namespace:
                         metavar='CHANNEL', help='Channel to check')
     parser.add_argument('--risk', dest='risk',
                         help='Filter channels by risk')
+    parser.add_argument('--only-missing', dest='only_missing',
+                        action='store_true',
+                        help='Only print when the revision is missing')
     return parser.parse_args()
 
 
@@ -132,6 +136,7 @@ def decode_channel_map(charm: str,
                        result: requests.Response,
                        channel: str,
                        version: Optional[str],
+                       only_missing: bool = False,
                        ) -> Optional[int]:
     """Decode the channel."""
     track = channel
@@ -151,12 +156,30 @@ def decode_channel_map(charm: str,
 
         if ((version is None or base_channel == version) and
                 (channel_track, channel_risk) == (track, risk)):
-            print(f"{charm:<30} -> {base_arch:6} {base_channel} "
-                  f"r:{revision_num:3} "
-                  f"{channel_track:>10}/{channel_risk:<10} -> [{arches_str}]")
+            if (only_missing and not revision) or not only_missing:
+                print(f"{charm:<30} -> {base_arch:6} {base_channel} "
+                      f"r:{revision_num:3} "
+                      f"{channel_track:>10}/{channel_risk:<10} -> "
+                      f"[{arches_str}]")
             return revision_num
 
     return None
+
+
+def print_rev(charm: str, channel: str, revision: str, only_missing: bool):
+    """Print the revision number."""
+
+    if only_missing and revision:
+        return
+
+    # only use colors in a tty.
+    if sys.stdout.isatty():
+        color = '' if revision else C_FAIL
+        clear = C_END
+    else:
+        color = clear = ''
+
+    print(f"{charm} {channel} revision: {color}{revision}{C_END}")
 
 
 def main() -> None:
@@ -179,9 +202,9 @@ def main() -> None:
     for charm in charms:
         cr = INFO_URL.format(charm=charm)
         r = requests.get(cr)
-        latest_stable = decode_channel_map(charm, r, 'latest/stable', '21.10')
-        color = '' if latest_stable else C_FAIL
-        print(f"{charm} latest/stable revision: {color}{latest_stable}{C_END}")
+        latest_stable = decode_channel_map(charm, r, 'latest/stable', '21.10',
+                                           opts.only_missing)
+        print_rev(charm, 'latest/stable', latest_stable, opts.only_missing)
 
         if opts.channels:
             channels = opts.channels
@@ -193,9 +216,9 @@ def main() -> None:
                 pass
 
         for channel in channels:
-            rev = decode_channel_map(charm, r, channel, None)
-            color = '' if rev else C_FAIL
-            print(f"{charm} {channel}     revision: {color}{rev}{C_END}")
+            rev = decode_channel_map(charm, r, channel, None,
+                                     opts.only_missing)
+            print_rev(charm, channel, rev, opts.only_missing)
 
 
 if __name__ == '__main__':
