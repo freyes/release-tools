@@ -1,5 +1,22 @@
 #!/usr/bin/env python3
-
+#
+# Usage examples:
+#
+# List the revisions associated to latest/stable and 3.6/edge in the
+# rabbitmq-server charm.
+#
+#     ./preseed-branch-tool.py -c rabbitmq-server --channel 3.6/edge
+#
+# List the revisions associated to latest/stable and xena/edge for all the
+# charms defined in lp-builder-config
+#
+#     ./preseed-branch-tool.py --channel xena/edge
+#
+# List the revisions associated to aodh charm in all the channels with the
+# edge risk
+#
+#     ./preseed-branch-tool.py --charm aodh --risk edge
+#
 import argparse
 import logging
 from pathlib import Path
@@ -26,6 +43,10 @@ assert LP_DIR.is_dir(), f"{LP_DIR} doesn't seem to exist?"
 LpConfig = Dict[str, Dict[str, List[str]]]
 
 
+# Colors
+C_FAIL = '\033[91m'
+C_END = '\033[0m'
+
 logger = logging.getLogger(__name__)
 
 
@@ -33,6 +54,10 @@ def setup_options() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument('-c', '--charms', nargs='*', dest='charms',
                         metavar='CHARMS', help='List of charms')
+    parser.add_argument('--channel', dest='channels', action='append',
+                        metavar='CHANNEL', help='Channel to check')
+    parser.add_argument('--risk', dest='risk',
+                        help='Filter channels by risk')
     return parser.parse_args()
 
 
@@ -90,6 +115,19 @@ def parse_lp_builder_config_file(config_file: Path) -> LpConfig:
     return lp_config
 
 
+def get_tracks(result: requests.Response,
+               only_risk: str) -> set[str]:
+    """Get the list of tracks."""
+    tracks = []
+    for channel_def in result.json()['channel-map']:
+        track = channel_def['channel']['track']
+        risk = channel_def['channel']['risk']
+        if not only_risk or only_risk == risk:
+            tracks.append(f"{track}/{risk}")
+
+    return set(tracks)
+
+
 def decode_channel_map(charm: str,
                        result: requests.Response,
                        channel: str,
@@ -113,7 +151,7 @@ def decode_channel_map(charm: str,
 
         if ((version is None or base_channel == version) and
                 (channel_track, channel_risk) == (track, risk)):
-            print(f"{charm:<30} ({i:2}) -> {base_arch:6} {base_channel} "
+            print(f"{charm:<30} -> {base_arch:6} {base_channel} "
                   f"r:{revision_num:3} "
                   f"{channel_track:>10}/{channel_risk:<10} -> [{arches_str}]")
             return revision_num
@@ -137,13 +175,28 @@ def main() -> None:
 
     print("charms", charms)
     print(f"Number of charms: {len(charms)}")
+
     for charm in charms:
         cr = INFO_URL.format(charm=charm)
         r = requests.get(cr)
         latest_stable = decode_channel_map(charm, r, 'latest/stable', '21.10')
-        print(f"{charm} latest/stable revision: {latest_stable}")
-        xena_edge = decode_channel_map(charm, r, 'xena/edge', None)
-        print(f"{charm} xena/edge     revision: {xena_edge}")
+        color = '' if latest_stable else C_FAIL
+        print(f"{charm} latest/stable revision: {color}{latest_stable}{C_END}")
+
+        if opts.channels:
+            channels = opts.channels
+        else:
+            channels = get_tracks(r, only_risk=opts.risk)
+            try:
+                channels.remove('latest/stable')
+            except KeyError:
+                pass
+
+        for channel in channels:
+            rev = decode_channel_map(charm, r, channel, None)
+            color = '' if rev else C_FAIL
+            print(f"{charm} {channel}     revision: {color}{rev}{C_END}")
+
 
 if __name__ == '__main__':
     logging.basicConfig()
