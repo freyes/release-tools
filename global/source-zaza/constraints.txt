@@ -1,0 +1,2 @@
+# https://github.com/yaml/pyyaml/issues/601
+cython<3.0
